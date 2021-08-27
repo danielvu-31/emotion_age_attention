@@ -10,16 +10,17 @@ class FaceModel(nn.Module):
                 tasks,
                 model_name,
                 init_xavier,
-                face_recognition_backbone_path,
                 intermediate_feature,
                 dropout_rate,
                 num_emotion_classes,
                 num_age_classes,
-                phase):
+                phase,
+                face_recognition_backbone_path=None):
         super().__init__()
         ch = [64, 128, 256, 512]
 
         backbone = iresnet_general(model_name)
+        self.output_dim = backbone.fc.out_features
         self.tasks = tasks
 
         if face_recognition_backbone_path is not None:
@@ -39,24 +40,28 @@ class FaceModel(nn.Module):
         self.shared_layer4_b = backbone.layer4[:-1]
         self.shared_layer4_t = backbone.layer4[-1]
 
-        # Define task specific attention modules (Bottleneck design)
-        self.encoder_att_1 = nn.ModuleList([self.att_layer(ch[0]) for _ in self.tasks])
-        self.encoder_att_2 = nn.ModuleList([self.att_layer(ch[1]) for _ in self.tasks])
-        self.encoder_att_3 = nn.ModuleList([self.att_layer(ch[2]) for _ in self.tasks])
-        self.encoder_att_4 = nn.ModuleList([self.att_layer(ch[3]) for _ in self.tasks])
+        # Define task specific attention modules using a similar bottleneck design in residual block
+        # (to avoid large computations)
+        self.encoder_att_1 = nn.ModuleList([self.att_layer(ch[0], 1) for _ in self.tasks])
+        self.encoder_att_2 = nn.ModuleList([self.att_layer(ch[1], 2) for _ in self.tasks])
+        self.encoder_att_3 = nn.ModuleList([self.att_layer(ch[2], 2) for _ in self.tasks])
+        self.encoder_att_4 = nn.ModuleList([self.att_layer(ch[3], 2) for _ in self.tasks])
 
-        # Sharing modules between 2 tasks (except last bottleneck)
-        self.encoder_block_att_1 = self.conv_layer(ch[0], ch[0], 2)
-        self.encoder_block_att_2 = self.conv_layer(ch[0], ch[1], 2)
-        self.encoder_block_att_3 = self.conv_layer(ch[1], ch[2], 2)
-
+        # Define task shared attention encoders using residual bottleneck layers
+        # We do not apply shared attention encoders at the last layer,
+        # so the attended features will be directly fed into the task-specific decoders.
+        self.encoder_block_att_1 = self.conv_layer(ch[0], 2)
+        self.encoder_block_att_2 = self.conv_layer(ch[1], 2)
+        self.encoder_block_att_3 = self.conv_layer(ch[2], 2)
+        
+        # self.down_sampling = nn.MaxPool2d(kernel_size=2, stride=2)
 
         # Classifiers
-        self.classifier_age, self.classifier_emo = nn.Identity(), nn.Identity()
+        self.classifier_age, self.classifier_emotion = nn.Identity(), nn.Identity()
         if "age" in model_name:
             self.classifier_age = nn.Sequential(
                 nn.Dropout(p=dropout_rate),
-                nn.Linear(in_features=512,
+                nn.Linear(in_features=self.output_dim,
                           out_features=intermediate_feature),
                 nn.ReLU(),
                 nn.Dropout(p=dropout_rate),
@@ -64,9 +69,9 @@ class FaceModel(nn.Module):
                           out_features=num_age_classes)
             )
         if "emotion" in model_name:
-            self.classifier_emo = nn.Sequential(
+            self.classifier_emotion = nn.Sequential(
                 nn.Dropout(p=dropout_rate),
-                nn.Linear(in_features=512,
+                nn.Linear(in_features=self.output_dim,
                           out_features=intermediate_feature),
                 nn.ReLU(),
                 nn.Dropout(p=dropout_rate),
@@ -83,24 +88,23 @@ class FaceModel(nn.Module):
                     if i != 3:
                         setattr(self, f"encoder_block_att_{i+1}", self._init_weights_xavier(f"encoder_block_att_{i+1}"))
 
-
-    def att_layer(self, in_channel):
+    def att_layer(self, in_channel, scale):
         return nn.Sequential(
-            nn.BatchNorm2d(in_channel),
-            nn.Conv2d(in_channels=in_channel, out_channels=in_channel, kernel_size=1, padding=0),
+            nn.BatchNorm2d(in_channel*scale),
+            nn.Conv2d(in_channels=in_channel*scale, out_channels=in_channel, kernel_size=1, padding=0),
             nn.BatchNorm2d(in_channel),
             nn.PReLU(num_parameters=in_channel),
             nn.Conv2d(in_channels=in_channel, out_channels=in_channel, kernel_size=1, padding=0),
             nn.BatchNorm2d(in_channel),
             nn.Sigmoid())
     
-    def conv_layer(self, in_channel, inter_channel, strides):
+    def conv_layer(self, in_channel, strides):
         downsample = nn.Sequential(
-            nn.Conv2d(in_channels=in_channel, out_channels=inter_channel,
+            nn.Conv2d(in_channels=in_channel, out_channels=in_channel*2,
                       kernel_size=1, stride=2, bias=False),
-            nn.BatchNorm2d(inter_channel)
+            nn.BatchNorm2d(in_channel*2)
         )
-        return IBasicBlock(in_channel, inter_channel, stride=strides, downsample=downsample)
+        return IBasicBlock(in_channel, in_channel*2, stride=strides, downsample=downsample)
 
     def _init_weights_xavier(self, model):
         '''
@@ -155,11 +159,20 @@ class FaceModel(nn.Module):
         a_4_mask = [att_i(torch.cat((u_4_b, a_3_i), dim=1)) for a_3_i, att_i in zip(a_3, self.encoder_att_4)]
         a_4 = [a_4_mask_i * u_4_t for a_4_mask_i in a_4_mask]
 
-        for t in self.tasks:
-            if t == "age":
-                age_output = self.classifier_age(a_4)
-            if t == "emotion":
-                emotion_output = self.classifier_emotion(a_4)
+        age_output = self.classifier_age(a_4)
+        emotion_output = self.classifier_emotion(a_4)
         
         return age_output, emotion_output
+    
+if __name__ == '__main__':
+    face = FaceModel(tasks=["age", "emotion"],
+                    model_name="iresnet100",
+                    init_xavier=False,
+                    face_recognition_backbone_path=None,
+                    intermediate_feature=256,
+                    dropout_rate=0.5,
+                    num_emotion_classes=5,
+                    num_age_classes=6,
+                    phase="train")
+    face.eval()
 

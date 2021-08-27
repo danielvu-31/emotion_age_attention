@@ -171,15 +171,9 @@ class ContextModule(nn.Module):
         a_4_mask = [att_i(torch.cat((u_4_b, a_3_i), dim=1)) for a_3_i, att_i in zip(a_3, self.encoder_att_4)]
         a_4 = [self.pooling(a_4_mask_i * u_4_t) for a_4_mask_i in a_4_mask]
 
-        output_dict = {}
-        for index, name in enumerate(self.tasks):
-            output_dict[name] = a_4[index]
-
-        for t in self.tasks:
-            if t == "age":
-                age_output = self.classifier_age(output_dict[t])
-            else:
-                emotion_output = self.classifier_emotion(output_dict[t])
+        age_output = self.classifier_age(a_4)
+        emotion_output = self.classifier_emotion(a_4)
+        
         return age_output, emotion_output
     
         
@@ -193,5 +187,7 @@ if __name__ == '__main__':
                         num_train_blocks=0)
     ctx.eval()
     a = torch.rand(1, 3, 224, 224)
-    print(ctx.output_dim)
-    out = ctx(a)
+    # print(ctx.output_dim)
+    # out = ctx(a)
+    print(ctx.encoder_att_1[0])
+    print(ctx.shared_layer1_t)
