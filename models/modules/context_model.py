@@ -186,8 +186,4 @@ if __name__ == '__main__':
                         intermediate_feature=256, dropout_rate=0.5,
                         num_train_blocks=0)
     ctx.eval()
-    a = torch.rand(1, 3, 224, 224)
-    # print(ctx.output_dim)
-    # out = ctx(a)
-    print(ctx.encoder_att_1[0])
-    print(ctx.shared_layer1_t)
+
