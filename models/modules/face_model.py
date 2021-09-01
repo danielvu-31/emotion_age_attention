@@ -3,9 +3,10 @@ import torch.nn as nn
 
 import torch
 from arcface_pytorch.iresnet import iresnet_general, IBasicBlock
+from base import BaseModel
 
 
-class FaceModel(nn.Module):
+class FaceModel(BaseModel):
     def __init__(self,
                 tasks,
                 model_name,

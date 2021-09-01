@@ -3,6 +3,7 @@ import torch.nn as nn
 import copy
 
 from .modules import FaceModel, ContextModule
+from base import BaseModel
 
 
 class GatingModule(nn.Module):
@@ -16,7 +17,7 @@ class GatingModule(nn.Module):
         return self.gating(out_age), self.gating(out_emotion)
 
 
-class ContextAwareAttention(nn.Module):
+class ContextAwareAttention(BaseModel):
     def __init__(self,
                  tasks,
                  intermediate_feature,
@@ -25,7 +26,7 @@ class ContextAwareAttention(nn.Module):
                  face_model_name,
                  face_dropout,
                  face_backbone_path,
-                 context_pretrained,
+                 context_pretrained, # True or False for ImageNet pretrained
                  context_model_name,
                  context_dropout,
                  phase):

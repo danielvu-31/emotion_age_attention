@@ -1,10 +1,10 @@
 import os
-# import cv2
-# import numpy as np
 import pandas as pd
-from PIL import Image
+import copy
+from PIL import Image, ImageDraw
 from torch.utils.data import Dataset
-import torchvision.transforms as transforms
+from torchvision import datasets, transforms
+from base import BaseDataLoader
 from .auto_augment import ImageNetPolicy
 
 
@@ -22,8 +22,24 @@ class FaceDataset(Dataset):
         self.phase = phase
         self.task = task
         col_used = [f"{name}_label" for name in task]
-        col_used.extend(['item_id', 'face_id'])
+        col_used.extend(['item_id', 'face_id', 'x1', 'y1', 'x2', 'y2'])
         label_df = pd.read_csv(label_path, usecols=col_used)
+
+        self.coordinate_per_image = dict()
+        image_id_list = label_df["item_id"].to_list()
+
+        # (x1, y1) - left-upper corner of bounding box
+        # (x2, y2) - right-bottom corner of bounding box
+        x1_list = label_df["x1"].to_list()
+        y1_list = label_df["y1"].to_list()
+        x2_list = label_df["x2"].to_list()
+        y2_list = label_df["y2"].to_list()
+
+        for id, x1, y1, x2, y2 in  \
+            zip(image_id_list, x1_list, y1_list, x2_list, y2_list):
+            if id not in self.coordinate_per_image.keys():
+                self.coordinate_per_image[id] = []
+            self.coordinate_per_image[id].append((x1, y1, x2, y2))
 
         if self.phase == 0: # 0: train, 1: val
             self.transform = transforms.Compose(
@@ -56,9 +72,22 @@ class FaceDataset(Dataset):
         image_id = self.item_id_list[index]
         face_id = self.face_id_list[index]
         try:
-            image_path = os.path.join(self.img_root, f'{image_id}_{face_id}.jpg')
-            image = Image.open(image_path)
-            image = self.transform(image)
+            full_image_path = os.path.join(self.img_root, f'{image_id}.jpg')
+            full_image = Image.open(full_image_path)['item_id']
+
+            face_coordinate = self.coordinate_per_image[image_id][face_id]
+            face_image = full_image.crop(face_coordinate)
+
+            # Context Image
+            context_image = copy.deepcopy(full_image)
+            draw = ImageDraw.Draw(context_image)
+            for face_coord in self.coordinate_per_image[image_id]:
+                draw.rectangle(face_coord, fill=(0, 0, 0))
+
+            face_image = self.transform(face_image)
+            context_image = self.transform(context_image)
+            full_image = self.transform(full_image)
+
         except Exception as exception:
             print('Exception:', exception)
             return self.__getitem__(index + 1)
@@ -69,4 +98,4 @@ class FaceDataset(Dataset):
             elif key == 'emotion':
                 emotion_label = self.labels[key][index]
 
-        return image_id, face_id, image, age_label, emotion_label
+        return image_id, face_id, face_image, context_image, full_image, age_label, emotion_label
