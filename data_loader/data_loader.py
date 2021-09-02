@@ -1,14 +1,14 @@
 import os
 import pandas as pd
 import copy
+import torch
 from PIL import Image, ImageDraw
-from torch.utils.data import Dataset
-from torchvision import datasets, transforms
+from torchvision import transforms
 from base import BaseDataLoader
 from .auto_augment import ImageNetPolicy
 
 
-class FaceDataset(Dataset):
+class FaceDataset(BaseDataLoader):
     def __init__(self,
                 img_root,
                 label_path,
@@ -41,7 +41,7 @@ class FaceDataset(Dataset):
                 self.coordinate_per_image[id] = []
             self.coordinate_per_image[id].append((x1, y1, x2, y2))
 
-        if self.phase == 0: # 0: train, 1: val
+        if self.phase == "train":
             self.transform = transforms.Compose(
                 [transforms.Resize(inp_img_size),
                 ImageNetPolicy(),
@@ -55,7 +55,7 @@ class FaceDataset(Dataset):
                 transforms.Normalize(mean, std)]
                 )
         
-        self.item_id_list = label_df['item_id'].to_list()
+        self.item_id_list = label_df.to_list()
         self.face_id_list = label_df['face_id'].to_list()
         self.labels, self.number_per_class = {}, {}
         for name in task:
@@ -65,6 +65,31 @@ class FaceDataset(Dataset):
                 if value != -1:
                     self.number_per_class[name][str(value)] = len(label_df[f"{name}_label"==value].to_list())
         
+        num_per_class_age = torch.FloatTensor([
+                        len(label_df[label_df['age_label'] == 0]),
+                        len(label_df[label_df['age_label'] == 1]),
+                        len(label_df[label_df['age_label'] == 2]),
+                        len(label_df[label_df['age_label'] == 3]),
+                        len(label_df[label_df['age_label'] == 4]),
+                        len(label_df[label_df['age_label'] == 5])
+                                                    ])
+        print("Age Class count: ", self.num_per_class_age)
+
+        num_per_class_emotion = torch.FloatTensor([
+                        len(label_df[label_df['emotion_label'] == 0]),
+                        len(label_df[label_df['emotion_label'] == 1]),
+                        len(label_df[label_df['emotion_label'] == 2]),
+                        len(label_df[label_df['emotion_label'] == 3]),
+                        len(label_df[label_df['emotion_label'] == 4])
+                                                        ])
+        
+        print("Emotion Class count: ", self.num_per_class_emotion)
+
+        self.class_statistics = {
+            "age": num_per_class_age,
+            "emotion": num_per_class_emotion
+        }
+        
     def __len__(self):
         return len(self.item_id_list)
     
@@ -73,7 +98,7 @@ class FaceDataset(Dataset):
         face_id = self.face_id_list[index]
         try:
             full_image_path = os.path.join(self.img_root, f'{image_id}.jpg')
-            full_image = Image.open(full_image_path)['item_id']
+            full_image = Image.open(full_image_path)
 
             face_coordinate = self.coordinate_per_image[image_id][face_id]
             face_image = full_image.crop(face_coordinate)
