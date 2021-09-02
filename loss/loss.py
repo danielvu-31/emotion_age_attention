@@ -62,21 +62,24 @@ class LossCalculator():
                 task_weight = task_weight / sum(task_weight) * len(self.tasks)
         else:
             task_weight = torch.Tensor([1. for _ in range(len(self.tasks))])
-        
         return task_weight
 
-    def _compute_loss(self, outputs, labels, weight_task):
+    def _compute_loss_per_task(self, outputs, labels):
         loss = dict()
         loss['sum'], loss['age'], loss['emotion']= \
             torch.tensor(data=0.).to(self.device), \
             torch.tensor(data=0.).to(self.device), \
             torch.tensor(data=0.).to(self.device)
-        for idx, t in enumerate(self.tasks):
+        for _, t in enumerate(self.tasks):
             loss[t] = self.criterion[t](outputs[t], labels[t])
+        return loss
+
+    def _compute_weighted_sum(self, loss, weight_task):
+        for idx, t in enumerate(self.tasks):
             weighted_loss = torch.mul(weight_task[idx].to(self.device),
                                     loss[t])
             loss['sum'] += weighted_loss
-        
+
         if self.weight_multi_task == "uncertainty":
             loss['sum'] += torch.log(1+torch.exp(self.logvar))
 
