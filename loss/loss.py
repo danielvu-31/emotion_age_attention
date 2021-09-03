@@ -47,19 +47,22 @@ class LossCalculator():
         return weight_class
     
     def _weighted_multi_task(self, loss, **kwargs):
-        if self.weight_multi_task == "uncertainty":
-            assert self.logvar is not None
-            # Init: logvar = nn.Parameter(torch.zeros((task_num)))
-            task_weight = torch.exp((-1)*self.logvar)
-        elif self.weight_multi_task == "lbtw":
-            if 0 in kwargs["initial_loss"].values():
-                task_weight = torch.ones(len(self.tasks))
+        if kwargs["mode"] == "train":
+            if self.weight_multi_task == "uncertainty":
+                assert self.logvar is not None
+                # Init: logvar = nn.Parameter(torch.zeros((task_num)))
+                task_weight = torch.exp((-1)*self.logvar)
+            elif self.weight_multi_task == "lbtw":
+                if 0 in kwargs["initial_loss"].values():
+                    task_weight = torch.ones(len(self.tasks))
+                else:
+                    loss_tasks = torch.Tensor(list(loss.values())).data()
+                    loss_ratio = loss_tasks/kwargs["initial_loss"]
+                    inverse_traing_rate = loss_ratio
+                    task_weight = inverse_traing_rate.pow(kwargs["alpha"])
+                    task_weight = task_weight / sum(task_weight) * len(self.tasks)
             else:
-                loss_tasks = torch.Tensor(list(loss.values()))
-                loss_ratio = loss_tasks/kwargs["initial_loss"]
-                inverse_traing_rate = loss_ratio
-                task_weight = inverse_traing_rate.pow(kwargs["alpha"])
-                task_weight = task_weight / sum(task_weight) * len(self.tasks)
+                task_weight = torch.Tensor([1. for _ in range(len(self.tasks))])
         else:
             task_weight = torch.Tensor([1. for _ in range(len(self.tasks))])
         return task_weight
