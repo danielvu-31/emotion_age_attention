@@ -26,13 +26,14 @@ class ContextAwareAttention(BaseModel):
                  face_model_name,
                  face_dropout,
                  face_backbone_path,
-                 context_pretrained, # True or False for ImageNet pretrained
+                 context_pretrained, # True or False for ImageNet ResNest pretrained
                  context_model_name,
                  context_dropout,
-                 phase):
+                 forward_phase,
+                 mode):
 
         super().__init__()
-        self.phase = phase
+        self.forward_phase = forward_phase
 
         self.face_module = FaceModel(tasks,
                                      face_model_name,
@@ -41,7 +42,7 @@ class ContextAwareAttention(BaseModel):
                                      face_dropout,
                                      num_emotion_classes,
                                      num_age_classes,
-                                     phase,
+                                     mode,
                                      face_backbone_path)
 
         self.context_module = ContextModule(context_pretrained,
@@ -60,11 +61,11 @@ class ContextAwareAttention(BaseModel):
         self.num_age_classes = num_age_classes
 
     def forward(self, face_image, context_image, full_image):
-        if self.phase == 'face':
+        if self.forward_phase == 'face':
             face_age, face_emotion = self.face_module(face_image)
             return face_age, face_emotion
 
-        elif self.phase == 'context':
+        elif self.forward_phase == 'context':
             context_age, context_emotion = self.context_module(context_image)
             return context_age, context_emotion
 

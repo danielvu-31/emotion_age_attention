@@ -1,24 +1,47 @@
+import os
 import torch
 from abc import abstractmethod
 from numpy import inf
 from logger import TensorboardWriter
+from weights import Freezer
+from data_loader import FaceDataset
+from optimizer import load_optimizer
 
 
 class BaseTrainer:
     """
     Base class for all trainers
     """
-    def __init__(self, model, criterion, metric_ftns, optimizer, config):
+    def __init__(self, config, tasks, model, criterion, optimizer, weight_control, device):
         self.config = config
         self.logger = config.get_logger('trainer', config['trainer']['verbosity'])
 
         self.model = model
+        self.tasks = tasks
         self.criterion = criterion
-        self.metric_ftns = metric_ftns
         self.optimizer = optimizer
+        self.device = device
+        self.weight_control = Freezer(self.model)
 
         cfg_trainer = config['trainer']
-        self.epochs = cfg_trainer['epochs']
+        self.start_epoch = cfg_trainer['start_epoch']
+
+        # Configure each phase and training epochs
+        # phase_1: Train Face (Classifier only - Warmup)
+        # phase_2: Train Face (All model)
+        # phase_3: Train Context (Warmup)
+        # phase_4: Train Context (All model + Attention Module)
+        # phase_5: Train Gating
+        # phase 6: Train all (Face + Context + gating)
+
+        self.epochs = cfg_trainer['phase_1'] +  \
+                        cfg_trainer['phase_2'] +  \
+                        cfg_trainer['phase_3'] +  \
+                        cfg_trainer['phase_4'] +  \
+                        cfg_trainer['phase_5'] +  \
+                        cfg_trainer['phase_6']
+
+        self.improved_loss, self.improved_age, self.improved_emotion = False, False, False
         self.save_period = cfg_trainer['save_period']
         self.monitor = cfg_trainer.get('monitor', 'off')
 
@@ -27,19 +50,26 @@ class BaseTrainer:
             self.mnt_mode = 'off'
             self.mnt_best = 0
         else:
-            self.mnt_mode, self.mnt_metric = self.monitor.split()
+            self.mnt_mode, self.mnt_metric = self.monitor.split() # mnt_metric should be val_accuracy/val_loss
             assert self.mnt_mode in ['min', 'max']
 
-            self.mnt_best = inf if self.mnt_mode == 'min' else -inf
+            self.mnt_best = {
+                "val_loss": inf,
+                "val_accuracy": {
+                    "age": -inf,
+                    "emotion": -inf
+                }
+            }
+
             self.early_stop = cfg_trainer.get('early_stop', inf)
             if self.early_stop <= 0:
                 self.early_stop = inf
 
         self.start_epoch = 1
-
         self.checkpoint_dir = config.save_dir
+        self.phase = 1
 
-        # setup visualization writer instance                
+        # TODO: setup visualization writer instance                
         self.writer = TensorboardWriter(config.log_dir, self.logger, cfg_trainer['tensorboard'])
 
         if config.resume is not None:
@@ -60,23 +90,48 @@ class BaseTrainer:
         """
         not_improved_count = 0
         for epoch in range(self.start_epoch, self.epochs + 1):
-            result = self._train_epoch(epoch)
+            phase, lr = self._check_phase(epoch)
+            if phase != self.phase:
+                self.phase = phase
+                self.weight_control.freeze_weight(phase)
+                self.model = self.weight_control._return_model()
+                self.init_train_cfg(lr)
+
+                # Re-init eval metric
+                self.mnt_best = {
+                            "val_loss": inf,
+                            "val_accuracy": {
+                                "age": -inf,
+                                "emotion": -inf
+                            }
+                        }
+
+            result_train, result_val = self._train_epoch(epoch)
 
             # save logged informations into log dict
             log = {'epoch': epoch}
-            log.update(result)
+            log.update(result_train)
+            log.update(result_val)
 
             # print logged informations to the screen
             for key, value in log.items():
-                self.logger.info('    {:15s}: {}'.format(str(key), value))
+                if type(value) != dict:
+                    self.logger.info('    {:15s}: {}'.format(str(key), value))
+                else:
+                    self.logger.info('    {:15s}: '.format(str(key)))
+                    for k, v in value.items():
+                        self.logger.info('    {:15s}: {}'.format(k, v))
 
             # evaluate model performance according to configured metric, save best checkpoint as model_best
             best = False
             if self.mnt_mode != 'off':
                 try:
                     # check whether model performance improved or not, according to specified metric(mnt_metric)
-                    improved = (self.mnt_mode == 'min' and log[self.mnt_metric] <= self.mnt_best) or \
-                               (self.mnt_mode == 'max' and log[self.mnt_metric] >= self.mnt_best)
+                    # We assume the objective function is MIN LOSS or MAX ACCURACY
+                    self.improved_loss = self.mnt_mode == 'min' and log[self.mnt_metric]["sum"] <= self.mnt_best
+                    self.improved_age =  self.mnt_mode == 'max' and log[self.mnt_metric]["age"] >= self.mnt_best[self.mnt_metric]["age"]
+                    self.improved_emotion = self.mnt_mode == 'max' and log[self.mnt_metric]["emotion"] >= self.mnt_best[self.mnt_metric]["emotion"]
+                    improved = self.improved_loss or self.improved_age or self.improved_emotion
                 except KeyError:
                     self.logger.warning("Warning: Metric '{}' is not found. "
                                         "Model performance monitoring is disabled.".format(self.mnt_metric))
@@ -84,7 +139,13 @@ class BaseTrainer:
                     improved = False
 
                 if improved:
-                    self.mnt_best = log[self.mnt_metric]
+                    if self.mnt_mode == 'min':
+                        self.mnt_best[self.mnt_metric] = log[self.mnt_metric]["sum"]
+                    else:
+                        if self.improved_age:
+                            self.mnt_best[self.mnt_metric]["age"] = log[self.mnt_metric]["age"]
+                        if self.improved_emotion:
+                            self.mnt_best[self.mnt_metric]["emotion"] = log[self.mnt_metric]["emotion"]
                     not_improved_count = 0
                     best = True
                 else:
@@ -98,13 +159,42 @@ class BaseTrainer:
             if epoch % self.save_period == 0:
                 self._save_checkpoint(epoch, save_best=best)
 
-    def _save_checkpoint(self, epoch, save_best=False):
+    def _check_phase(self, epoch):
+        phase_list = []
+        phase_threshold = 0
+        for index in range(6):
+            phase_threshold += self.config['trainer'][f'phase_{index+1}']
+            phase_list[index] = phase_threshold
+
+        if epoch <= phase_list[0]:
+            phase = 1
+            lr = self.config['lr_phase']['phase1']
+        elif phase_list[1] < epoch <= phase_list[2]:
+            phase = 2
+            lr = self.config['lr_phase']['phase2']
+        elif phase_list[2] < epoch <= phase_list[3]:
+            phase = 3
+            lr = self.config['lr_phase']['phase3']
+        elif phase_list[3] < epoch <= phase_list[4]:
+            phase = 4
+            lr = self.config['lr_phase']['phase4']
+        elif phase_list[4] < epoch <= phase_list[5]:
+            phase = 5
+            lr = self.config['lr_phase']['phase5']
+        else:
+            phase = 6
+            lr = self.train_configs['lr_all']
+
+            return phase, lr
+
+    def _save_checkpoint(self,
+                        epoch):
         """
         Saving checkpoints
 
         :param epoch: current epoch number
         :param log: logging information of the epoch
-        :param save_best: if True, rename the saved checkpoint to 'model_best.pth'
+        :param save_best: if True, rename the saved checkpoint to 'best-().pth'
         """
         arch = type(self.model).__name__
         state = {
@@ -115,15 +205,26 @@ class BaseTrainer:
             'monitor_best': self.mnt_best,
             'config': self.config
         }
+
+        if self.improved_loss:
+            filename = os.path.join(self.checkpoint_dir / 'best-loss.pth')
+            self.logger.info("Saving checkpoint new best checkpoint based on val loss: {} ...".format(filename))
+            torch.save(state, filename)
+        if self.improved_age:
+            filename = os.path.join(self.checkpoint_dir / 'best-age.pth')
+            self.logger.info("Saving checkpoint new best checkpoint based on age accuracy: {} ...".format(filename))
+            torch.save(state, filename)
+        if self.improved_emotion:
+            filename = os.path.join(self.checkpoint_dir / 'best-emotion.pth')
+            self.logger.info("Saving checkpoint new best checkpoint based on emotion accuracy: {} ...".format(filename))
+            torch.save(state, filename)
+
         filename = str(self.checkpoint_dir / 'checkpoint-epoch{}.pth'.format(epoch))
         torch.save(state, filename)
         self.logger.info("Saving checkpoint: {} ...".format(filename))
-        if save_best:
-            best_path = str(self.checkpoint_dir / 'model_best.pth')
-            torch.save(state, best_path)
-            self.logger.info("Saving current best: model_best.pth ...")
 
     def _resume_checkpoint(self, resume_path):
+        # TODO: Review this function again
         """
         Resume from saved checkpoints
 
@@ -149,3 +250,17 @@ class BaseTrainer:
             self.optimizer.load_state_dict(checkpoint['optimizer'])
 
         self.logger.info("Checkpoint loaded. Resume training from epoch {}".format(self.start_epoch))
+    
+
+    def init_train_cfg(self, lr):
+        # Dataloaders
+        self.train_loader = self.config.init_obj('train_loader', FaceDataset)
+        self.val_loader = self.config.init_obj('val_loader', FaceDataset)
+
+        # Optimizer
+        self.optimizer = load_optimizer(self.model, lr, self.config['optimizer']['type'])
+
+        # Best last phase checkpoint
+        self.model.load_state_dict(torch.load(os.path.join(self.checkpoint_dir / 'best-loss.pth'),
+                                                map_location="cpu"))
+

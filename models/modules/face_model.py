@@ -15,7 +15,7 @@ class FaceModel(BaseModel):
                 dropout_rate,
                 num_emotion_classes,
                 num_age_classes,
-                phase,
+                mode,
                 face_recognition_backbone_path=None):
         super().__init__()
         ch = [64, 128, 256, 512]
@@ -80,7 +80,7 @@ class FaceModel(BaseModel):
                           out_features=num_emotion_classes)
             )
         
-        if phase == 'train':
+        if mode == 'train':
             if init_xavier:
                 self.classifier_age = self._init_weights_xavier(self.classifier_age)
                 self.classifier_emotion = self._init_weights_xavier(self.classifier_emotion)

@@ -6,7 +6,7 @@
         "type": "MnistModel",
         "args": {}
     },
-    "data_loader": {
+    "train_loader": {
         "type": "MnistDataLoader",
         "args":{
             "data_dir": "data/",
@@ -24,10 +24,15 @@
             "amsgrad": true
         }
     },
-    "loss": "nll_loss",
-    "metrics": [
-        "accuracy", "top_k_acc"
-    ],
+    "lr_phase": {
+        "phase1": 0.001,
+        "phase2": 0.0001,
+        "phase3": 0.001,
+        "phase4": 0.0001,
+        "phase5": 0.0001,
+        "phase6": 0.0001,
+        "weight_decay": 1e-6
+    },
     "lr_scheduler": {
         "type": "StepLR",
         "args": {
@@ -35,15 +40,25 @@
             "gamma": 0.1
         }
     },
+    "loss": "nll_loss",
+    "metrics": [
+        "accuracy", "top_k_acc"
+    ],
     "trainer": {
-        "epochs": 100,
+        "start_epoch": 0,
+        "phase_1": 2,
+        "phase_2": 10,
+        "phase_3": 5,
+        "phase_4": 10,
+        "phase_5": 10,
+        "phase_6": 10,
 
         "save_dir": "saved/",
         "save_period": 1,
         "verbosity": 2,
         
         "monitor": "min val_loss",
-        "early_stop": 10,
+        "early_stop": 0,
 
         "tensorboard": true
     }

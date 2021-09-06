@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 from pathlib import Path
 from functools import reduce, partial
@@ -155,3 +156,10 @@ def _set_by_path(tree, keys, value):
 def _get_by_path(tree, keys):
     """Access a nested object in tree by sequence of keys."""
     return reduce(getitem, keys, tree)
+
+
+if __name__ == '__main__':
+    with open("config.json", "r") as f:
+        data = json.load(f)
+    cfg = ConfigParser(data)
+

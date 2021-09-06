@@ -65,3 +65,26 @@ class MetricTracker:
 
     def result(self):
         return dict(self._data.average)
+
+
+def log_tensorboard(writer,
+                    tasks,
+                    phase,
+                    results, 
+                    mode,
+                    epoch):
+
+    writer.add_scalar(f"Phase {phase}/{mode.capitalize()}/Sum",
+                      results[f'{mode}_loss']["sum"],
+                      epoch)
+    for t in tasks:
+        writer.add_scalar(f"Phase {phase}/{mode.capitalize()}/{t.capitalize()}",
+                        results[f'{mode}_loss'][t],
+                        epoch)
+    
+    if mode == "val":
+        for t in tasks:
+            writer.add_scalar(f"Phase {phase}/{mode.capitalize()}/{t.capitalize()}",
+                            results[f'{mode}_accuracy'][t],
+                            epoch)
+

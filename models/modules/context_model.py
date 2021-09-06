@@ -4,7 +4,7 @@ import torch.nn as nn
 from resnest.torch import resnest50, resnest101
 from resnest.torch.models.resnet import Bottleneck 
 from resnest.torch.models.splat import SplAtConv2d
-from base import BaseModel
+# from base import BaseModel
 
 class GlobalAvgPool2d(nn.Module):
     def __init__(self):
@@ -15,7 +15,7 @@ class GlobalAvgPool2d(nn.Module):
         return nn.functional.adaptive_avg_pool2d(inputs, 1).view(inputs.size(0), -1)
 
 
-class ContextModule(BaseModel):
+class ContextModule(nn.Module):
     def __init__(self,
                 imagenet_pretrained,
                 model_name,
@@ -186,4 +186,5 @@ if __name__ == '__main__':
                         intermediate_feature=256, dropout_rate=0.5,
                         num_train_blocks=0)
     ctx.eval()
+    print(ctx)
 
