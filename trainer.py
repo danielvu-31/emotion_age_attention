@@ -19,14 +19,13 @@ class Trainer(BaseTrainer):
                  config,
                  device,
                  train_loader,
+                 val_loader,
                  writer,
                  resume_ckpt_path=None,
-                 val_loader=None,
                  lr_scheduler=None):
-        super().__init__(tasks, model, criterion, optimizer, device, config)
+        super().__init__(config, tasks, model, criterion, optimizer, device)
 
         self.train_loader = train_loader
-        self.len_epoch = len(self.train_data_loader)
         self.val_loader = val_loader
         self.writer = writer
 
@@ -37,7 +36,7 @@ class Trainer(BaseTrainer):
         self.model = model
         if resume_ckpt_path is not None:
             self.model.load_state_dict(torch.load(resume_ckpt_path,
-                                                    map_location="cpu"))
+                                                    map_location="cpu")['state_dict'])
 
 
     def _train_epoch(self, epoch):
@@ -57,10 +56,9 @@ class Trainer(BaseTrainer):
         :return: A log that contains average loss and metric in this epoch.
         """
         self.model.train()
-        self.train_metrics.reset()
         initial_loss_list = torch.zeros(len(self.tasks)).to(self.device)
 
-        train_pbar = tqdm(self.train_loader, desc=f'[EPOCH] {epoch + 1}')
+        train_pbar = tqdm(self.train_loader, desc=f'[EPOCH] {epoch}')
 
         for _, (_, _, face_image, context_image, full_image, age_label, emotion_label) \
             in enumerate(train_pbar):
@@ -82,7 +80,8 @@ class Trainer(BaseTrainer):
             loss = self.criterion._compute_loss_per_task(outputs, labels)
             task_weights = self.criterion._weighted_multi_task(loss,
                                                                initial_loss=initial_loss_list,
-                                                               alpha=0.5)
+                                                               alpha=0.5,
+                                                               mode="train")
             loss = self.criterion._compute_weighted_sum(loss, task_weights)
             
             if self.config['optimizer']['type'] == "sam":
@@ -163,7 +162,7 @@ class Trainer(BaseTrainer):
             'total_emotion': 0,
         }
 
-        val_pbar = tqdm(self.val_loader, desc=f'[VALIDATION] {epoch + 1}')
+        val_pbar = tqdm(self.val_loader, desc=f'[VALIDATION] {epoch}')
         with torch.no_grad():
             for _, (_, _, face_image, context_image, full_image, age_label, emotion_label) in enumerate(val_pbar):
     
@@ -197,7 +196,7 @@ class Trainer(BaseTrainer):
                 })
 
                 for t in self.tasks:
-                    self.val_stats['val_loss'][t] += val_loss[t].item()*len(labels[t])
+                    val_stats['val_loss'][t] += val_loss[t].item()*len(labels[t])
 
                 if outputs['age'].shape[1] == self.num_emotion_classes:
                     _, out_age_pred = torch.max(outputs['age'], 1)
@@ -214,22 +213,22 @@ class Trainer(BaseTrainer):
             # Accuracy & Loss Summary
             for t in self.tasks:
                 # Loss
-                self.val_stats['val_loss'][t] /= corrects[f'total_{t}']
-                self.val_stats['val_loss']["sum"] += self.val_stats['val_loss'][t]
+                val_stats['val_loss'][t] /= float(corrects[f'total_{t}'])
+                val_stats['val_loss']["sum"] += val_stats['val_loss'][t]
 
-                print(f"---Val Loss for {t.upper()}: {self.val_stats['val_loss'][t]}")
+                print(f"---Val Loss for {t.upper()}: {val_stats['val_loss'][t]}")
 
                 # Accuracy
-                self.val_stats['val_accuracy'][t] = float(corrects[t] / corrects[f'total_{t}'])
-                print(f"---Val Acc for {t.upper()}: {self.val_stats['val_accuracy'][t]}")
+                val_stats['val_accuracy'][t] = float(corrects[t] / corrects[f'total_{t}'])
+                print(f"---Val Acc for {t.upper()}: {val_stats['val_accuracy'][t]}")
             
-            print(f"---Val Total Loss: {self.val_stats['val_loss']['sum']}")
+            print(f"---Val Total Loss: {val_stats['val_loss']['sum']}")
         
             # Step LR
             if self.lr_scheduler is not None and \
-                self.val_stats['val_loss']['sum'] > self.best_val_loss:
+                val_stats['val_loss']['sum'] > self.best_val_loss:
                 self.lr_count_step += 1
-                if self.lr_count_step == self.cfg_trainer['lr_threshold']:
+                if self.lr_count_step == self.config['trainer']['lr_threshold']:
                     print('Stepping LR...')
                     self.lr_scheduler.step()
                     self.lr_count_step = 0

@@ -2,7 +2,6 @@ import os
 import torch
 from abc import abstractmethod
 from numpy import inf
-from logger import TensorboardWriter
 from weights import Freezer
 from data_loader import FaceDataset
 from optimizer import load_optimizer
@@ -12,7 +11,7 @@ class BaseTrainer:
     """
     Base class for all trainers
     """
-    def __init__(self, config, tasks, model, criterion, optimizer, weight_control, device):
+    def __init__(self, config, tasks, model, criterion, optimizer, device):
         self.config = config
         self.logger = config.get_logger('trainer', config['trainer']['verbosity'])
 
@@ -67,10 +66,7 @@ class BaseTrainer:
 
         self.start_epoch = 1
         self.checkpoint_dir = config.save_dir
-        self.phase = 1
-
-        # TODO: setup visualization writer instance                
-        self.writer = TensorboardWriter(config.log_dir, self.logger, cfg_trainer['tensorboard'])
+        self.phase = 1              
 
         if config.resume is not None:
             self._resume_checkpoint(config.resume)
@@ -183,7 +179,7 @@ class BaseTrainer:
             lr = self.config['lr_phase']['phase5']
         else:
             phase = 6
-            lr = self.train_configs['lr_all']
+            lr = self.config['lr_phase']['phase6']
 
             return phase, lr
 
@@ -207,19 +203,19 @@ class BaseTrainer:
         }
 
         if self.improved_loss:
-            filename = os.path.join(self.checkpoint_dir / 'best-loss.pth')
+            filename = os.path.join(self.checkpoint_dir, 'best-loss.pth')
             self.logger.info("Saving checkpoint new best checkpoint based on val loss: {} ...".format(filename))
             torch.save(state, filename)
         if self.improved_age:
-            filename = os.path.join(self.checkpoint_dir / 'best-age.pth')
+            filename = os.path.join(self.checkpoint_dir, 'best-age.pth')
             self.logger.info("Saving checkpoint new best checkpoint based on age accuracy: {} ...".format(filename))
             torch.save(state, filename)
         if self.improved_emotion:
-            filename = os.path.join(self.checkpoint_dir / 'best-emotion.pth')
+            filename = os.path.join(self.checkpoint_dir, 'best-emotion.pth')
             self.logger.info("Saving checkpoint new best checkpoint based on emotion accuracy: {} ...".format(filename))
             torch.save(state, filename)
 
-        filename = str(self.checkpoint_dir / 'checkpoint-epoch{}.pth'.format(epoch))
+        filename = os.path.join(self.checkpoint_dir, 'checkpoint-epoch{}.pth'.format(epoch))
         torch.save(state, filename)
         self.logger.info("Saving checkpoint: {} ...".format(filename))
 
@@ -260,7 +256,7 @@ class BaseTrainer:
         # Optimizer
         self.optimizer = load_optimizer(self.model, lr, self.config['optimizer']['type'])
 
-        # Best last phase checkpoint
-        self.model.load_state_dict(torch.load(os.path.join(self.checkpoint_dir / 'best-loss.pth'),
-                                                map_location="cpu"))
+        # Last phase best checkpoint
+        self.model.load_state_dict(torch.load(os.path.join(self.checkpoint_dir, 'best-loss.pth'),
+                                                map_location="cpu")['state_dict'])
 

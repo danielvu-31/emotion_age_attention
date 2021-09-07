@@ -41,10 +41,13 @@ class Freezer():
         elif phase <= 4:
             self._set_parameter_requires_grad([self.model.face_module, self.model.gating_module], False)
             self._set_parameter_requires_grad([self.model.context_module], True)
+            self.model.forward_phase = "context"
         elif phase <= 5:
+            self.model.forward_phase = "all"
             self._set_parameter_requires_grad([self.model.face_module, self.model.context_module], False)
             self._set_parameter_requires_grad([self.model.gating_module], True)
         else:
+            self.model.forward_phase = "all"
             self._set_parameter_requires_grad([self.model], True)
 
     def _return_model(self):

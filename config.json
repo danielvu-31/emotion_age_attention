@@ -1,23 +1,48 @@
 {
-    "name": "Mnist_LeNet",
-    "n_gpu": 1,
+    "name": "Age and Emotion",
+    "gpu_id": 0,
+    "tasks": ["age", "emotion"],
 
     "arch": {
-        "type": "MnistModel",
-        "args": {}
+        "type": "ContextAwareAttention",
+        "args": {
+            "tasks": ["age", "emotion"],
+            "intermediate_feature": 256,
+            "num_age_classes": 5,
+            "num_emotion_classes": 6,
+            "face_model_name": "iresnet100",
+            "face_dropout": 0.5,
+            "face_backbone_path": "<Path to face backbone ckpt>",
+            "context_pretrained": true,
+            "context_model_name": "resnest50",
+            "context_dropout": 0.5,
+            "forward_phase": "face",
+            "mode": "train"}
     },
     "train_loader": {
-        "type": "MnistDataLoader",
+        "type": "FaceDataset",
         "args":{
-            "data_dir": "data/",
-            "batch_size": 128,
-            "shuffle": true,
-            "validation_split": 0.1,
-            "num_workers": 2
+            "img_root": "<Path to full images>",
+            "label_path": "<Path to ground truth files>",
+            "inp_img_size": 224,
+            "mean": [0.485, 0.456, 0.406],
+            "std": [0.229, 0.224, 0.225],
+            "phase": "train"
+        }
+    },
+    "val_loader": {
+        "type": "FaceDataset",
+        "args":{
+            "img_root": "<Path to full images>",
+            "label_path": "<Path to ground truth files>",
+            "inp_img_size": 224,
+            "mean": [0.485, 0.456, 0.406],
+            "std": [0.229, 0.224, 0.225],
+            "phase": "val"
         }
     },
     "optimizer": {
-        "type": "Adam",
+        "type": "sam",
         "args":{
             "lr": 0.001,
             "weight_decay": 0,
@@ -40,12 +65,13 @@
             "gamma": 0.1
         }
     },
-    "loss": "nll_loss",
-    "metrics": [
-        "accuracy", "top_k_acc"
-    ],
+    "loss": {
+        "weight_class": true,
+        "multi_task_type": "uncertainty"
+        },
+
     "trainer": {
-        "start_epoch": 0,
+        "start_epoch": 1,
         "phase_1": 2,
         "phase_2": 10,
         "phase_3": 5,
@@ -53,13 +79,15 @@
         "phase_5": 10,
         "phase_6": 10,
 
+        "lr_threshold": 5,
+
+        "resume_ckpt_path": null,
+
         "save_dir": "saved/",
         "save_period": 1,
         "verbosity": 2,
         
         "monitor": "min val_loss",
-        "early_stop": 0,
-
-        "tensorboard": true
+        "early_stop": 0
     }
 }

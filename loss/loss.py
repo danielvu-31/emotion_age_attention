@@ -6,12 +6,10 @@ import torch.nn.functional as F
 class LossCalculator():
     def __init__(self,
                 tasks,
-                loss_type,
                 class_stats,
                 device,
                 use_class_weight=True,
                 weight_multi_task="sum"):
-        self.loss_type = loss_type
         self.tasks = tasks
         self.device = device
         self.use_class_weight = use_class_weight
