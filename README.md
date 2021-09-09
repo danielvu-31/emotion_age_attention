@@ -1,7 +1,3 @@
-[![Forks][forks-shield]][forks-url]
-[![Stargazers][stars-shield]][stars-url]
-[![Issues][issues-shield]][issues-url]
-
 <!-- ABOUT THE PROJECT -->
 ## Age and Emotion Recognition
 
